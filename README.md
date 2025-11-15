@@ -71,5 +71,5 @@ The theme is auto-detected based on the `TERM` environment variable, but can be 
 ## Testing
 
 ```bash
-./tm
+./tctest
 ```
