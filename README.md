@@ -2,6 +2,8 @@
 
 A simple, lightweight menu application using ncurses.
 
+![tcmenu screenshot](images/tcmenu.png)
+
 ## Building
 
 ### Using autoconf (recommended)

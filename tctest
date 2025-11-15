@@ -1,4 +1,4 @@
-./tcmenu --title "Test Application" --entry \
+./tcmenu "$@" --title "Test Application" --entry \
     "Virtuo Framework (not including Gateways and Techpacks)" \
     "Application Components only" \
     "Directory Server System" \
