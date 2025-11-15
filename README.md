@@ -2,6 +2,10 @@
 
 A simple, lightweight menu application using ncurses.
 
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![C](https://img.shields.io/badge/language-c-blue.svg)
+
+
 ![tcmenu screenshot](images/tcmenu.png)
 
 ## Building
