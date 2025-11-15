@@ -47,7 +47,7 @@ static tc_theme_t detect_theme_from_term(void) {
     if (strstr(term, "xterm-color") || 
         strstr(term, "xterm-256color") ||
         strcmp(term, "ansi") == 0) {
-        return TC_THEME_NOCOLOR;
+        return TC_THEME_DARK;
     }
     
     /* Default to dark theme for modern terminals with color support */
