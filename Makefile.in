@@ -1,0 +1,34 @@
+# Makefile.in - Template for autoconf
+CC = @CC@
+CFLAGS = @CFLAGS@ -std=c99 -Wall -Wextra -pedantic
+LDFLAGS = @LDFLAGS@
+LIBS = @LIBS@
+
+PROGRAM = tcmenu
+OBJECTS = tcmenu.o main.o
+
+all: $(PROGRAM)
+
+$(PROGRAM): $(OBJECTS)
+	$(CC) $(LDFLAGS) -o $@ $(OBJECTS) $(LIBS)
+
+tcmenu.o: tcmenu.c tcmenu.h config.h
+	$(CC) $(CFLAGS) -c tcmenu.c
+
+main.o: main.c tcmenu.h config.h
+	$(CC) $(CFLAGS) -c main.c
+
+clean:
+	rm -f $(OBJECTS) $(PROGRAM)
+
+distclean: clean
+	rm -f config.h config.status config.log Makefile
+
+install: $(PROGRAM)
+	install -d $(DESTDIR)$(prefix)/bin
+	install -m 755 $(PROGRAM) $(DESTDIR)$(prefix)/bin/
+
+uninstall:
+	rm -f $(DESTDIR)$(prefix)/bin/$(PROGRAM)
+
+.PHONY: all clean distclean install uninstall

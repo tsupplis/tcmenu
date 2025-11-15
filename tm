@@ -1,0 +1,13 @@
+./tcmenu --title "Test Application" --entry \
+    "Virtuo Framework (not including Gateways and Techpacks)" \
+    "Application Components only" \
+    "Directory Server System" \
+    "Database Components only" \
+    "Gateway Environment 1" \
+    "Gateway Environment 2" \
+    "Gateway Environment 3" \
+    "Gateway Environment 4" \
+    "Gateway Environment 5" \
+    "Gateway Environment 6" \
+    "Set of Test Techpacks" 
+
