@@ -19,7 +19,7 @@ static void print_usage(const char *program_name) {
     fprintf(stderr, "  -d, --default N        Set default selection to N\n");
     fprintf(stderr, "  -f, --fd N             Output result to file descriptor N\n");
     fprintf(stderr, "  -i, --interactive      Force interactive mode\n");
-    fprintf(stderr, "  --theme THEME          Set color theme: dark, light, or nocolor\n");
+    fprintf(stderr, "  --theme THEME          Set color theme: dark, light, nocolor, or simple\n");
     fprintf(stderr, "                         (default: auto-detect based on TERM)\n");
     fprintf(stderr, "  -h, --help             Display this help message\n\n");
     fprintf(stderr, "Example:\n");
@@ -134,8 +134,10 @@ int main(int argc, char **argv) {
                 theme = TC_THEME_LIGHT;
             } else if (strcmp(argv[i], "nocolor") == 0) {
                 theme = TC_THEME_NOCOLOR;
+            } else if (strcmp(argv[i], "simple") == 0) {
+                theme = TC_THEME_SIMPLE;
             } else {
-                fprintf(stderr, "Unknown theme: %s (use: dark, light, or nocolor)\n", argv[i]);
+                fprintf(stderr, "Unknown theme: %s (use: dark, light, nocolor, or simple)\n", argv[i]);
                 free(choices);
                 return -1;
             }

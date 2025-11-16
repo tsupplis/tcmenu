@@ -13,7 +13,8 @@ typedef WINDOW tc_window_t;
 typedef enum {
     TC_THEME_DARK,
     TC_THEME_LIGHT,
-    TC_THEME_NOCOLOR
+    TC_THEME_NOCOLOR,
+    TC_THEME_SIMPLE
 } tc_theme_t;
 
 /**
