@@ -236,7 +236,15 @@ tc_menu_t *tc_create_menu(const char *title, int row, int col, int width, int he
     }
     
     /* Draw border and title */
-    box(window, 0, 0);
+    mvwaddch(window, 0, 0, ACS_ULCORNER);
+    mvwhline(window, 0, 1, ACS_HLINE, width - 2);
+    mvwaddch(window, 0, width - 1, ACS_URCORNER);
+    mvwvline(window, 1, 0, ACS_VLINE, height - 2);
+    mvwvline(window, 1, width - 1, ACS_VLINE, height - 2);
+    mvwaddch(window, height - 1, 0, ACS_LLCORNER);
+    mvwhline(window, height - 1, 1, ACS_HLINE, width - 2);
+    mvwaddch(window, height - 1, width - 1, ACS_LRCORNER);
+    
     if (current_theme != TC_THEME_NOCOLOR && has_colors()) {
         print_in_middle(window, 1, 0, width, title, COLOR_PAIR(COLOR_TITLE) | A_BOLD);
     } else {
