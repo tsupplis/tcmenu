@@ -96,6 +96,7 @@ tc_theme_t tc_get_theme(void) {
  * Ensures the result is properly null-terminated and fits within max_len.
  */
 static void truncate_with_ellipsis(char *dest, const char *src, size_t max_len) {
+    size_t src_len;
     if (max_len < 4) {
         /* Not enough space even for "..." */
         if (max_len > 0) {
@@ -104,13 +105,14 @@ static void truncate_with_ellipsis(char *dest, const char *src, size_t max_len) 
         return;
     }
     
-    size_t src_len = strlen(src);
+    src_len = strlen(src);
     if (src_len < max_len - 1) {
+        size_t i;
         /* String fits, copy it and pad with spaces */
         strncpy(dest, src, max_len - 1);
         dest[max_len - 1] = '\0';
         /* Pad with spaces to fill the width */
-        for (size_t i = src_len; i < max_len - 1; i++) {
+        for (i = src_len; i < max_len - 1; i++) {
             dest[i] = ' ';
         }
         dest[max_len - 1] = '\0';
@@ -130,6 +132,7 @@ tc_menu_t *tc_create_menu(const char *title, int row, int col, int width, int he
     tc_item_t **items;
     tc_menu_t *menu;
     tc_window_t *window;
+    int max_item_len;
     
     if (!entries || !title || width < 10 || height < 6) {
         return NULL;
@@ -155,7 +158,7 @@ tc_menu_t *tc_create_menu(const char *title, int row, int col, int width, int he
     
     /* Calculate maximum item length based on window width */
     /* Account for: mark " * " (3 chars) + padding (2 chars) + borders (2 chars) */
-    int max_item_len = width - 7;
+    max_item_len = width - 7;
     if (max_item_len < 1) {
         max_item_len = 1;
     }
@@ -308,13 +311,16 @@ int tc_query_menu(tc_menu_t *menu, int support_exit) {
 }
 
 void tc_free_menu_resources(tc_menu_t *menu) {
+    ITEM **items;
+    int count;
+    int i;
+    
     if (!menu) {
         return;
     }
     
-    ITEM **items = menu_items(menu);
-    int count = item_count(menu);
-    int i;
+    items = menu_items(menu);
+    count = item_count(menu);
     
     unpost_menu(menu);
     free_menu(menu);
