@@ -21,8 +21,8 @@ make
 ### Manual build (if autoconf not available)
 
 ```bash
-cc -std=c99 -Wall -Wextra -c tcmenu.c
-cc -std=c99 -Wall -Wextra -c main.c
+cc -std=c89 -Wall -Wextra -c tcmenu.c
+cc -std=c89 -Wall -Wextra -c main.c
 cc -o tcmenu tcmenu.o main.o -lmenu -lncurses
 ```
 

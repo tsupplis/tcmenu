@@ -5,10 +5,10 @@ AC_CONFIG_HEADERS([config.h])
 # Checks for programs
 AC_PROG_CC
 
-# Ensure C99 support
-m4_version_prereq([2.70], [], [AC_PROG_CC_C99])
-if test "x$ac_cv_prog_cc_c99" = "xno" && test "x$ac_cv_prog_cc_stdc" = "xno"; then
-    AC_MSG_ERROR([C99 support is required])
+# Ensure C89 support
+m4_version_prereq([2.70], [], [AC_PROG_CC_C89])
+if test "x$ac_cv_prog_cc_c89" = "xno" && test "x$ac_cv_prog_cc_stdc" = "xno"; then
+    AC_MSG_ERROR([C89 support is required])
 fi
 
 # Checks for libraries

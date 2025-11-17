@@ -165,10 +165,11 @@ tc_menu_t *tc_create_menu(const char *title, int row, int col, int width, int he
     
     /* Create items with proper truncation */
     for (i = 0; i < count; i++) {
+        int j;
         char *item_text = (char *)calloc(max_item_len + 1, sizeof(char));
         if (!item_text) {
             /* Clean up on allocation failure */
-            for (int j = 0; j < i; j++) {
+            for (j = 0; j < i; j++) {
                 free((void *)item_name(items[j]));
                 free_item(items[j]);
             }
@@ -180,9 +181,10 @@ tc_menu_t *tc_create_menu(const char *title, int row, int col, int width, int he
         items[i] = new_item(item_text, NULL);
         
         if (!items[i]) {
+            int j;
             free(item_text);
             /* Clean up on item creation failure */
-            for (int j = 0; j < i; j++) {
+            for (j = 0; j < i; j++) {
                 free((void *)item_name(items[j]));
                 free_item(items[j]);
             }
@@ -312,11 +314,12 @@ void tc_free_menu_resources(tc_menu_t *menu) {
     
     ITEM **items = menu_items(menu);
     int count = item_count(menu);
+    int i;
     
     unpost_menu(menu);
     free_menu(menu);
     
-    for (int i = 0; i < count; i++) {
+    for (i = 0; i < count; i++) {
         if (items[i]) {
             free((void *)item_name(items[i]));
             free_item(items[i]);

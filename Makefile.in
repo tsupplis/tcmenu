@@ -1,6 +1,6 @@
 # Makefile.in - Template for autoconf
 CC = @CC@
-CFLAGS = @CFLAGS@ -std=c99 -Wall -Wextra -pedantic
+CFLAGS = @CFLAGS@ -std=c89 -Wall -Wextra -pedantic
 LDFLAGS = @LDFLAGS@
 LIBS = @LIBS@
 
