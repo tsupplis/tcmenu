@@ -11,12 +11,18 @@ if test "x$ac_cv_prog_cc_c89" = "xno" && test "x$ac_cv_prog_cc_stdc" = "xno"; th
     AC_MSG_ERROR([C89 support is required])
 fi
 
-# Checks for libraries
-AC_CHECK_LIB([ncurses], [initscr], [],
-    [AC_MSG_ERROR([ncurses library not found])])
-AC_CHECK_LIB([menu], [new_menu], [],
-    [AC_MSG_ERROR([menu library (part of ncurses) not found])],
-    [-lncurses])
+# Prefer the wide-character libraries; macOS provides these under the
+# traditional ncurses/menu names.
+AC_CHECK_LIB([ncursesw], [initscr], [
+    LIBS="-lncursesw $LIBS"
+    AC_CHECK_LIB([menuw], [new_menu], [LIBS="-lmenuw $LIBS"],
+        [AC_MSG_ERROR([menuw library not found])])
+], [
+    AC_CHECK_LIB([ncurses], [initscr], [],
+        [AC_MSG_ERROR([ncurses library not found])])
+    AC_CHECK_LIB([menu], [new_menu], [],
+        [AC_MSG_ERROR([menu library not found])], [-lncurses])
+])
 
 # Checks for header files
 AC_CHECK_HEADERS([ncurses.h menu.h signal.h stdlib.h string.h], [],

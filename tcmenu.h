@@ -20,7 +20,8 @@ typedef enum {
 
 /**
  * Initialize the display system (ncurses) with a specific theme.
- * Must be called before creating any menus.
+ * Call this or tc_attach_display before creating menus.
+ * This convenience initializer owns stdscr; call tc_end_display to end it.
  * 
  * @param theme The theme to use (dark, light, or nocolor)
  */
@@ -60,13 +61,18 @@ tc_menu_t *tc_create_menu(const char *title, int row, int col, int width, int he
  */
 int tc_query_menu(tc_menu_t *menu, int support_exit);
 
-/* Caller owns signal handlers and flag. Polls every 100ms; -1 on interruption. */
+/* Caller owns signal handlers and flag. Polls every 100ms; -1 on interruption.
+ * This variant assumes curses reads stdin. Restores blocking input on return.
+ * Use tc_query_menu for custom newterm input streams.
+ */
 int tc_query_menu_interruptible(tc_menu_t *menu, int support_exit,
                                 const volatile sig_atomic_t *interrupted);
 
 /**
  * Free menu resources.
  * 
+ * Only pass menus returned by tc_create_menu; do not replace their windows
+ * or item array. Free menus before ending/detaching the display.
  * @param menu The menu to free
  */
 void tc_free_menu_resources(tc_menu_t *menu);

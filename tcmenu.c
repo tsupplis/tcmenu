@@ -9,7 +9,6 @@
 #include <unistd.h>
 #include <errno.h>
 
-#define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
 #define MAX_ITEM_LENGTH 256
 
 static int display_initialized = 0;
@@ -41,44 +40,36 @@ void tc_init_display(tc_theme_t theme) {
 }
 
 void tc_attach_display(tc_theme_t theme) {
-    if (!display_initialized) {
+    if (!display_initialized && stdscr) {
         display_initialized = 1;
         current_theme = theme;
         
         
-        /* Initialize colors based on theme */
-        if (has_colors() && theme != TC_THEME_NOCOLOR && theme != TC_THEME_SIMPLE) {
-            start_color();
-            
-            if (theme == TC_THEME_DARK) {
-                /* Dark theme: bright white on black */
-                init_pair(COLOR_BACKGROUND, COLOR_WHITE, COLOR_BLACK);
-                init_pair(COLOR_NORMAL, COLOR_WHITE, COLOR_BLACK);
-                init_pair(COLOR_HIGHLIGHT, COLOR_WHITE, COLOR_GREEN);
-                init_pair(COLOR_TITLE, COLOR_GREEN, COLOR_BLACK);
-                init_pair(COLOR_INSTRUCTIONS, COLOR_WHITE, COLOR_BLACK);
-                
-                /* Paint entire screen with black background */
-                assume_default_colors(COLOR_WHITE, COLOR_BLACK);
-            } else if (theme == TC_THEME_LIGHT) {
-                /* Light theme: black on bright white (using -1 for default terminal white) */
-                use_default_colors();
-                init_pair(COLOR_BACKGROUND, COLOR_BLACK, -1);
-                init_pair(COLOR_NORMAL, COLOR_BLACK, -1);
-                init_pair(COLOR_HIGHLIGHT, COLOR_WHITE, COLOR_GREEN);
-                init_pair(COLOR_TITLE, COLOR_BLACK, -1);
-                init_pair(COLOR_INSTRUCTIONS, COLOR_BLACK, -1);
-                
-                /* Paint entire screen with terminal's default background (bright white) */
-                assume_default_colors(COLOR_BLACK, -1);
+        /* Only use color pairs after successful initialization. */
+        if (theme == TC_THEME_DARK || theme == TC_THEME_LIGHT) {
+            short fg = theme == TC_THEME_DARK ? COLOR_WHITE : COLOR_BLACK;
+            short bg = theme == TC_THEME_DARK ? COLOR_BLACK : COLOR_WHITE;
+            short title_fg = theme == TC_THEME_DARK ? COLOR_GREEN : COLOR_BLACK;
+            if (!has_colors() || start_color() == ERR || COLOR_PAIRS <= 5) {
+                current_theme = TC_THEME_NOCOLOR;
+                return;
             }
-            
-            /* Clear and fill screen with the default colors */
-            bkgd(COLOR_PAIR(0));
-            clear();
-            refresh();
+            if (theme == TC_THEME_LIGHT && use_default_colors() == OK) bg = -1;
+            if (init_pair(COLOR_BACKGROUND, fg, bg) == ERR ||
+                init_pair(COLOR_NORMAL, fg, bg) == ERR ||
+                init_pair(COLOR_HIGHLIGHT, COLOR_WHITE, COLOR_GREEN) == ERR ||
+                init_pair(COLOR_TITLE, title_fg, bg) == ERR ||
+                init_pair(COLOR_INSTRUCTIONS, fg, bg) == ERR) {
+                current_theme = TC_THEME_NOCOLOR;
+                return;
+            }
+            if (display_owned) {
+                bkgd(COLOR_PAIR(COLOR_BACKGROUND));
+                clear();
+                refresh();
+            }
         }
-        
+
     }
 }
 
@@ -184,8 +175,9 @@ tc_menu_t *tc_create_menu(const char *title, int row, int col, int width, int he
         if (!item_text) {
             /* Clean up on allocation failure */
             for (j = 0; j < i; j++) {
-                free((void *)item_name(items[j]));
+                const char *name = item_name(items[j]);
                 free_item(items[j]);
+                free((void *)name);
             }
             free(items);
             return NULL;
@@ -198,8 +190,9 @@ tc_menu_t *tc_create_menu(const char *title, int row, int col, int width, int he
             free(item_text);
             /* Clean up on item creation failure */
             for (j = 0; j < i; j++) {
-                free((void *)item_name(items[j]));
+                const char *name = item_name(items[j]);
                 free_item(items[j]);
+                free((void *)name);
             }
             free(items);
             return NULL;
@@ -211,8 +204,9 @@ tc_menu_t *tc_create_menu(const char *title, int row, int col, int width, int he
     menu = new_menu(items);
     if (!menu) {
         for (i = 0; i < count; i++) {
-            free((void *)item_name(items[i]));
+            const char *name = item_name(items[i]);
             free_item(items[i]);
+            free((void *)name);
         }
         free(items);
         return NULL;
@@ -224,8 +218,9 @@ tc_menu_t *tc_create_menu(const char *title, int row, int col, int width, int he
         unpost_menu(menu);
         free_menu(menu);
         for (i = 0; i < count; i++) {
-            free((void *)item_name(items[i]));
+            const char *name = item_name(items[i]);
             free_item(items[i]);
+            free((void *)name);
         }
         free(items);
         return NULL;
@@ -310,7 +305,7 @@ int tc_query_menu_interruptible(tc_menu_t *menu, int support_exit,
             input.events = POLLIN;
             input.revents = 0;
             if (interrupted && (errno == 0 || errno == EINTR) &&
-                poll(&input, 1, 0) >= 0 &&
+                poll(&input, 1, 0) == 0 &&
                 !(input.revents & (POLLHUP | POLLERR | POLLNVAL))) continue;
             break;
         }
@@ -339,7 +334,6 @@ int tc_query_menu_interruptible(tc_menu_t *menu, int support_exit,
                 result = item_index(current_item(menu));
                 goto done;
         }
-        wrefresh(menu_win(menu));
     }
     
 done:
@@ -368,8 +362,9 @@ void tc_free_menu_resources(tc_menu_t *menu) {
     
     for (i = 0; i < count; i++) {
         if (items[i]) {
-            free((void *)item_name(items[i]));
+            const char *name = item_name(items[i]);
             free_item(items[i]);
+            free((void *)name);
         }
     }
     free(items);

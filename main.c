@@ -62,13 +62,6 @@ static tc_theme_t detect_theme_from_term(void) {
         return TC_THEME_NOCOLOR;
     }
     
-    /* Check for color terminals that typically use light backgrounds */
-    if (strstr(term, "xterm-color") || 
-        strstr(term, "xterm-256color") ||
-        strcmp(term, "ansi") == 0) {
-        return TC_THEME_DARK;
-    }
-    
     /* Default to dark theme for modern terminals with color support */
     return TC_THEME_DARK;
 }
@@ -227,19 +220,19 @@ int main(int argc, char **argv) {
         tc_end_display();
         sigaction(SIGINT, &old_int, NULL);
         sigaction(SIGTERM, &old_term, NULL);
-        fprintf(out, "-2\n");
+        if (!interrupted) fprintf(out, "-2\n");
         free(choices);
-        return -2;
+        return interrupted ? 128 + interrupted : -2;
     }
     
     if (set_current_item(my_menu, menu_items(my_menu)[default_value]) != E_OK) {
         result = -1;
     } else {
         if (LINES >= 8) {
-            mvaddnstr(LINES - 2, 0, "PageUp/PageDown to scroll", COLS - 1);
+            mvaddnstr(LINES - 2, 0, "PageUp/PageDown to scroll,", COLS - 1);
             mvaddnstr(LINES - 1, 0, support_exit ?
-                      "Arrows: navigate; Enter: select; X: exit" :
-                      "Arrows: navigate; Enter: select", COLS - 1);
+                      "Arrows to navigate, Enter to select and 'X' exit" :
+                      "Arrows to navigate and Enter to select", COLS - 1);
         }
         refresh();
         result = tc_query_menu_interruptible(my_menu, support_exit, &interrupted);
