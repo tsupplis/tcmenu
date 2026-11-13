@@ -1,13 +1,19 @@
+#define _XOPEN_SOURCE 700
 #include "tcmenu.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <signal.h>
+#include <wchar.h>
+#include <limits.h>
+#include <poll.h>
+#include <unistd.h>
+#include <errno.h>
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
 #define MAX_ITEM_LENGTH 256
 
 static int display_initialized = 0;
+static int display_owned = 0;
 static tc_theme_t current_theme = TC_THEME_DARK;
 
 /* Color pair definitions */
@@ -23,22 +29,22 @@ enum {
 static void print_in_middle(tc_window_t *win, int starty, int startx, int width, 
                             const char *string, chtype color);
 
-/* Signal handler wrapper */
-static void signal_handler(int sig) {
-    (void)sig; /* Unused parameter */
-    tc_end_display();
-    exit(0);
+void tc_init_display(tc_theme_t theme) {
+    if (display_initialized) return;
+    initscr();
+    display_owned = 1;
+    tc_attach_display(theme);
+    curs_set(0);
+    cbreak();
+    noecho();
+    keypad(stdscr, TRUE);
 }
 
-void tc_init_display(tc_theme_t theme) {
+void tc_attach_display(tc_theme_t theme) {
     if (!display_initialized) {
         display_initialized = 1;
         current_theme = theme;
         
-        initscr();
-        curs_set(0);
-        signal(SIGINT, signal_handler);
-        signal(SIGTERM, signal_handler);
         
         /* Initialize colors based on theme */
         if (has_colors() && theme != TC_THEME_NOCOLOR && theme != TC_THEME_SIMPLE) {
@@ -73,15 +79,13 @@ void tc_init_display(tc_theme_t theme) {
             refresh();
         }
         
-        cbreak();
-        noecho();
-        keypad(stdscr, TRUE);
     }
 }
 
 void tc_end_display(void) {
     if (display_initialized) {
-        endwin();
+        if (display_owned) endwin();
+        display_owned = 0;
         display_initialized = 0;
     }
 }
@@ -90,38 +94,43 @@ tc_theme_t tc_get_theme(void) {
     return current_theme;
 }
 
-/**
- * Safely truncate a string with ellipsis if it exceeds max_len.
- * Pads with spaces to fill max_len.
- * Ensures the result is properly null-terminated and fits within max_len.
- */
-static void truncate_with_ellipsis(char *dest, const char *src, size_t max_len) {
-    size_t src_len;
-    if (max_len < 4) {
-        /* Not enough space even for "..." */
-        if (max_len > 0) {
-            dest[0] = '\0';
+/* Copy complete multibyte characters, measuring terminal columns. */
+static char *fit_text(const char *src, int columns, int *used) {
+    size_t length = strlen(src), pos = 0, out = 0, n;
+    char *dest = malloc(length + (size_t)columns + 4);
+    mbstate_t state;
+    wchar_t wc;
+    int cells = 0, w, limit = columns, truncated = 0;
+    if (!dest) return NULL;
+    memset(&state, 0, sizeof(state));
+    while (pos < length) {
+        n = mbrtowc(&wc, src + pos, length - pos, &state);
+        if (n == (size_t)-1 || n == (size_t)-2 || n == 0) {
+            n = 1; w = 1; memset(&state, 0, sizeof(state));
+        } else {
+            w = wcwidth(wc);
+            if (w < 0) w = 1;
         }
-        return;
+        cells += w; pos += n;
     }
-    
-    src_len = strlen(src);
-    if (src_len < max_len - 1) {
-        size_t i;
-        /* String fits, copy it and pad with spaces */
-        strncpy(dest, src, max_len - 1);
-        dest[max_len - 1] = '\0';
-        /* Pad with spaces to fill the width */
-        for (i = src_len; i < max_len - 1; i++) {
-            dest[i] = ' ';
-        }
-        dest[max_len - 1] = '\0';
-    } else {
-        /* Truncate and add ellipsis */
-        strncpy(dest, src, max_len - 4);
-        dest[max_len - 4] = '\0';
-        strcat(dest, "...");
+    if (cells > columns) { truncated = 1; limit -= columns >= 3 ? 3 : 0; }
+    pos = 0; cells = 0;
+    memset(&state, 0, sizeof(state));
+    while (pos < length) {
+        int invalid = 0;
+        n = mbrtowc(&wc, src + pos, length - pos, &state);
+        if (n == (size_t)-1 || n == (size_t)-2 || n == 0) {
+            n = 1; w = 1; invalid = 1; memset(&state, 0, sizeof(state));
+        } else { w = wcwidth(wc); if (w < 0) { w = 1; invalid = 1; } }
+        if (cells + w > limit) break;
+        if (invalid) dest[out++] = '?';
+        else { memcpy(dest + out, src + pos, n); out += n; }
+        cells += w; pos += n;
     }
+    if (truncated && columns >= 3) { memcpy(dest + out, "...", 3); out += 3; cells += 3; }
+    dest[out] = '\0';
+    if (used) *used = cells;
+    return dest;
 }
 
 tc_menu_t *tc_create_menu(const char *title, int row, int col, int width, int height, 
@@ -132,9 +141,11 @@ tc_menu_t *tc_create_menu(const char *title, int row, int col, int width, int he
     tc_item_t **items;
     tc_menu_t *menu;
     tc_window_t *window;
+    tc_window_t *subwindow;
     int max_item_len;
     
-    if (!entries || !title || width < 10 || height < 6) {
+    if (!stdscr || !entries || !title || width < 10 || height < 6 ||
+        row < 0 || col < 0 || height > LINES - row || width > COLS - col) {
         return NULL;
     }
     
@@ -169,7 +180,7 @@ tc_menu_t *tc_create_menu(const char *title, int row, int col, int width, int he
     /* Create items with proper truncation */
     for (i = 0; i < count; i++) {
         int j;
-        char *item_text = (char *)calloc(max_item_len + 1, sizeof(char));
+        char *item_text = fit_text(entries[i], max_item_len, NULL);
         if (!item_text) {
             /* Clean up on allocation failure */
             for (j = 0; j < i; j++) {
@@ -180,7 +191,6 @@ tc_menu_t *tc_create_menu(const char *title, int row, int col, int width, int he
             return NULL;
         }
         
-        truncate_with_ellipsis(item_text, entries[i], max_item_len + 1);
         items[i] = new_item(item_text, NULL);
         
         if (!items[i]) {
@@ -221,26 +231,20 @@ tc_menu_t *tc_create_menu(const char *title, int row, int col, int width, int he
         return NULL;
     }
     
-    keypad(window, TRUE);
-    
-    /* Configure menu window and subwindow */
-    set_menu_win(menu, window);
-    set_menu_sub(menu, derwin(window, height - 4, width - 2, 3, 1));
-    set_menu_format(menu, height - 4, 1);
-    
-    /* Set menu mark */
-    set_menu_mark(menu, " * ");
-    
-    /* Set colors based on theme */
-    if (current_theme != TC_THEME_NOCOLOR && has_colors()) {
-        set_menu_fore(menu, COLOR_PAIR(COLOR_HIGHLIGHT) | A_BOLD);
-        set_menu_back(menu, COLOR_PAIR(COLOR_NORMAL));
-        set_menu_grey(menu, COLOR_PAIR(COLOR_NORMAL) | A_DIM);
-        
-        /* Set window background */
-        wbkgd(window, COLOR_PAIR(COLOR_NORMAL));
+    subwindow = derwin(window, height - 4, width - 2, 3, 1);
+    if (!subwindow) goto setup_failed;
+    if (keypad(window, TRUE) == ERR ||
+        set_menu_win(menu, window) != E_OK ||
+        set_menu_sub(menu, subwindow) != E_OK ||
+        set_menu_format(menu, height - 4, 1) != E_OK ||
+        set_menu_mark(menu, " * ") != E_OK) goto setup_failed;
+    if ((current_theme == TC_THEME_DARK || current_theme == TC_THEME_LIGHT) && has_colors()) {
+        if (set_menu_fore(menu, COLOR_PAIR(COLOR_HIGHLIGHT) | A_BOLD) != E_OK ||
+            set_menu_back(menu, COLOR_PAIR(COLOR_NORMAL)) != E_OK ||
+            set_menu_grey(menu, COLOR_PAIR(COLOR_NORMAL) | A_DIM) != E_OK ||
+            wbkgd(window, COLOR_PAIR(COLOR_NORMAL)) == ERR) goto setup_failed;
     }
-    
+
     /* Draw border and title */
     if (current_theme != TC_THEME_SIMPLE) {
         mvwaddch(window, 0, 0, ACS_ULCORNER);
@@ -253,7 +257,7 @@ tc_menu_t *tc_create_menu(const char *title, int row, int col, int width, int he
         mvwaddch(window, height - 1, width - 1, ACS_LRCORNER);
     }
     
-    if (current_theme != TC_THEME_NOCOLOR && has_colors()) {
+    if ((current_theme == TC_THEME_DARK || current_theme == TC_THEME_LIGHT) && has_colors()) {
         print_in_middle(window, 1, 0, width, title, COLOR_PAIR(COLOR_TITLE) | A_BOLD);
     } else {
         print_in_middle(window, 1, 0, width, title, A_BOLD);
@@ -265,20 +269,51 @@ tc_menu_t *tc_create_menu(const char *title, int row, int col, int width, int he
     }
     
     return menu;
+
+setup_failed:
+    free_menu(menu);
+    for (i = 0; i < count; i++) {
+        const char *name = item_name(items[i]);
+        free_item(items[i]);
+        free((void *)name);
+    }
+    free(items);
+    if (subwindow) delwin(subwindow);
+    delwin(window);
+    return NULL;
 }
 
 int tc_query_menu(tc_menu_t *menu, int support_exit) {
-    int c;
+    return tc_query_menu_interruptible(menu, support_exit, NULL);
+}
+
+int tc_query_menu_interruptible(tc_menu_t *menu, int support_exit,
+                                const volatile sig_atomic_t *interrupted) {
+    int c, result = -1;
+    WINDOW *win;
     
     if (!menu) {
         return -1;
     }
     
-    post_menu(menu);
-    touchwin(menu_win(menu));
-    wrefresh(menu_win(menu));
-    
-    while ((c = wgetch(menu_win(menu))) != 0) {
+    win = menu_win(menu);
+    if (post_menu(menu) != E_OK) return -1;
+    touchwin(win);
+    if (interrupted) wtimeout(win, 100);
+    while (!interrupted || !*interrupted) {
+        if (wrefresh(win) == ERR) break;
+        errno = 0;
+        c = wgetch(win);
+        if (c == ERR) {
+            struct pollfd input;
+            input.fd = STDIN_FILENO;
+            input.events = POLLIN;
+            input.revents = 0;
+            if (interrupted && (errno == 0 || errno == EINTR) &&
+                poll(&input, 1, 0) >= 0 &&
+                !(input.revents & (POLLHUP | POLLERR | POLLNVAL))) continue;
+            break;
+        }
         switch (c) {
             case KEY_DOWN:
                 menu_driver(menu, REQ_DOWN_ITEM);
@@ -295,22 +330,26 @@ int tc_query_menu(tc_menu_t *menu, int support_exit) {
             case 'x':
             case 'X':
                 if (support_exit) {
-                    return -3;
+                    result = -3;
+                    goto done;
                 }
                 break;
             case 10:        /* Enter key */
             case KEY_ENTER:
-                return item_index(current_item(menu));
+                result = item_index(current_item(menu));
+                goto done;
         }
         wrefresh(menu_win(menu));
     }
     
+done:
+    if (interrupted) { wtimeout(win, -1); if (*interrupted) result = -1; }
     unpost_menu(menu);
-    refresh();
-    return 0;
+    return result;
 }
 
 void tc_free_menu_resources(tc_menu_t *menu) {
+    WINDOW *window, *subwindow;
     ITEM **items;
     int count;
     int i;
@@ -319,6 +358,8 @@ void tc_free_menu_resources(tc_menu_t *menu) {
         return;
     }
     
+    window = menu_win(menu);
+    subwindow = menu_sub(menu);
     items = menu_items(menu);
     count = item_count(menu);
     
@@ -331,35 +372,19 @@ void tc_free_menu_resources(tc_menu_t *menu) {
             free_item(items[i]);
         }
     }
+    free(items);
+    if (subwindow && subwindow != window) delwin(subwindow);
+    if (window) delwin(window);
 }
 
 /* Internal helper function */
 static void print_in_middle(tc_window_t *win, int starty, int startx, int width, 
                            const char *string, chtype color) {
-    int length, x, y;
-    int temp;
-    
-    if (win == NULL) {
-        win = stdscr;
-    }
-    
-    getyx(win, y, x);
-    
-    if (startx != 0) {
-        x = startx;
-    }
-    if (starty != 0) {
-        y = starty;
-    }
-    if (width == 0) {
-        width = 80;
-    }
-    
-    length = strlen(string);
-    temp = (width - length) / 2;
-    x = startx + temp;
-    
+    int length;
+    char *text = fit_text(string, width - 2, &length);
+    if (!text) return;
     wattron(win, color);
-    mvwprintw(win, y, x, "%s", string);
+    mvwaddstr(win, starty, startx + (width - length) / 2, text);
     wattroff(win, color);
+    free(text);
 }

@@ -3,6 +3,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <locale.h>
+#include <errno.h>
+#include <limits.h>
+#include <unistd.h>
 
 #define STATE_START 0
 #define STATE_ENTRY 1
@@ -11,13 +15,28 @@
 #define STATE_TITLE 4
 #define STATE_THEME 5
 
+static volatile sig_atomic_t interrupted = 0;
+
+static void handle_signal(int sig) { interrupted = sig; }
+
+static int parse_number(const char *text, int *value) {
+    char *end;
+    long number;
+    errno = 0;
+    number = strtol(text, &end, 10);
+    if (errno || !*text || *end || number < 0 || number > INT_MAX) return 0;
+    *value = (int)number;
+    return 1;
+}
+
 static void print_usage(const char *program_name) {
     fprintf(stderr, "Usage: %s [OPTIONS]\n\n", program_name);
     fprintf(stderr, "A terminal-based menu system for interactive selection.\n\n");
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  -t, --title TEXT       Set menu title\n");
     fprintf(stderr, "  -e, --entry            Start menu entries (all following args are entries)\n");
-    fprintf(stderr, "  -d, --default N        Set default selection to N\n");
+    fprintf(stderr, "  -x, --exit             Allow X to exit\n");
+    fprintf(stderr, "  -d, --default N        Return zero-based N (preselect with -i)\n");
     fprintf(stderr, "  -f, --fd N             Output result to file descriptor N\n");
     fprintf(stderr, "  -i, --interactive      Force interactive mode\n");
     fprintf(stderr, "  --theme THEME          Set color theme: dark, light, nocolor, or simple\n");
@@ -38,7 +57,6 @@ static tc_theme_t detect_theme_from_term(void) {
     /* Check for terminals without color support first */
     if (strcmp(term, "dumb") == 0 || 
         strcmp(term, "unknown") == 0 ||
-        strcmp(term, "xterm") == 0 ||
         strstr(term, "vt") != NULL ||
         strstr(term, "mono") != NULL) {
         return TC_THEME_NOCOLOR;
@@ -52,7 +70,7 @@ static tc_theme_t detect_theme_from_term(void) {
     }
     
     /* Default to dark theme for modern terminals with color support */
-    return TC_THEME_NOCOLOR;
+    return TC_THEME_DARK;
 }
 
 static int match_arg(const char *arg, const char *short_opt, const char *long_opt) {
@@ -62,7 +80,9 @@ static int match_arg(const char *arg, const char *short_opt, const char *long_op
 int main(int argc, char **argv) {
     int result = 0;
     const char *title = "";
-    int silent = 0;
+    int force_interactive = 0, have_default = 0, support_exit = 0;
+    int row, col;
+    struct sigaction action, old_int, old_term;
     int default_value = 0;
     tc_menu_t *my_menu;
     int width = 50;
@@ -75,6 +95,8 @@ int main(int argc, char **argv) {
     FILE *out = stderr;
     tc_theme_t theme = detect_theme_from_term();
     
+    setlocale(LC_ALL, "");
+
     /* Allocate choices array */
     choices = (char **)calloc(argc + 1, sizeof(char *));
     if (!choices) {
@@ -91,7 +113,9 @@ int main(int argc, char **argv) {
                 free(choices);
                 return 0;
             } else if (match_arg(argv[i], "-i", "--interactive")) {
-                silent = 0;
+                force_interactive = 1;
+            } else if (match_arg(argv[i], "-x", "--exit")) {
+                support_exit = 1;
             } else if (match_arg(argv[i], "-d", "--default")) {
                 cmdline_state = STATE_DEFAULT;
             } else if (match_arg(argv[i], "-f", "--fd")) {
@@ -110,10 +134,10 @@ int main(int argc, char **argv) {
             }
             break;
         case STATE_FD:
-            fd = atoi(argv[i]);
-            out = fdopen(fd, "w");
-            if (!out) {
-                out = stderr;
+            if (!parse_number(argv[i], &fd) || !(out = fdopen(fd, "w"))) {
+                fprintf(stderr, "Invalid output descriptor: %s\n", argv[i]);
+                free(choices);
+                return 2;
             }
             cmdline_state = STATE_START;
             break;
@@ -125,7 +149,12 @@ int main(int argc, char **argv) {
             cmdline_state = STATE_START;
             break;
         case STATE_DEFAULT:
-            default_value = atoi(argv[i]);
+            if (!parse_number(argv[i], &default_value)) {
+                fprintf(stderr, "Invalid default: %s\n", argv[i]);
+                free(choices);
+                return 2;
+            }
+            have_default = 1;
             cmdline_state = STATE_START;
             break;
         case STATE_THEME:
@@ -147,6 +176,16 @@ int main(int argc, char **argv) {
         }
     }
     
+    if (cmdline_state != STATE_START && cmdline_state != STATE_ENTRY) {
+        fprintf(stderr, "Missing option argument\n");
+        free(choices);
+        return 2;
+    }
+    if (have_default && default_value >= count) {
+        fprintf(stderr, "Default selection is outside the entry range\n");
+        free(choices);
+        return 2;
+    }
     /* Validate we have menu entries */
     if (count == 0) {
         fprintf(out, "-2\n");
@@ -155,7 +194,7 @@ int main(int argc, char **argv) {
     }
     
     /* Handle silent mode */
-    if (silent == 1) {
+    if (have_default && !force_interactive) {
         fprintf(out, "%d\n", default_value);
         free(choices);
         return default_value;
@@ -164,59 +203,56 @@ int main(int argc, char **argv) {
     /* NULL-terminate choices array */
     choices[count] = NULL;
     
-    /* Initialize display with selected theme */
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = handle_signal;
+    sigemptyset(&action.sa_mask);
+    if (sigaction(SIGINT, &action, &old_int) < 0) {
+        tc_end_display(); free(choices); return 2;
+    }
+    if (sigaction(SIGTERM, &action, &old_term) < 0) {
+        sigaction(SIGINT, &old_int, NULL);
+        tc_end_display(); free(choices); return 2;
+    }
+
+    /* Handlers must be installed before curses initialization. */
     tc_init_display(theme);
-    
-    /* Calculate menu dimensions */
-    width = COLS;
-    if (width > 200) {
-        width = 200;
-    }
-    width -= 10;
-    height = LINES;
-    height -= 12;
-    
-    /* Ensure minimum dimensions */
-    if (height < 10) {
-        height = 10;
-    }
-    if (width < 40) {
-        width = 40;
-    }
-    
-    /* Create the menu */
-    my_menu = tc_create_menu(title, 5, 5, width, height, choices);
+
+    width = COLS > 200 ? 200 : COLS;
+    height = LINES >= 8 ? LINES - 2 : LINES;
+    if (height > 15) height = 15;
+    row = (LINES - (LINES >= 8 ? 2 : 0) - height) / 2;
+    col = (COLS - width) / 2;
+    my_menu = tc_create_menu(title, row, col, width, height, choices);
     if (!my_menu) {
         tc_end_display();
+        sigaction(SIGINT, &old_int, NULL);
+        sigaction(SIGTERM, &old_term, NULL);
         fprintf(out, "-2\n");
         free(choices);
         return -2;
     }
     
-    /* Ensure background is painted */
-    if (tc_get_theme() != TC_THEME_NOCOLOR && has_colors()) {
-        touchwin(stdscr);
+    if (set_current_item(my_menu, menu_items(my_menu)[default_value]) != E_OK) {
+        result = -1;
+    } else {
+        if (LINES >= 8) {
+            mvaddnstr(LINES - 2, 0, "PageUp/PageDown to scroll", COLS - 1);
+            mvaddnstr(LINES - 1, 0, support_exit ?
+                      "Arrows: navigate; Enter: select; X: exit" :
+                      "Arrows: navigate; Enter: select", COLS - 1);
+        }
         refresh();
+        result = tc_query_menu_interruptible(my_menu, support_exit, &interrupted);
     }
-    
-    /* Display instructions */
-    if (tc_get_theme() != TC_THEME_NOCOLOR && has_colors()) {
-        attron(COLOR_PAIR(5) | A_BOLD);
-    }
-    mvprintw(LINES - 4, 2, "Use PageUp and PageDown to scroll down or up a page of items");
-    mvprintw(LINES - 3, 2, "Arrow Keys to navigate (X to Exit)");
-    if (tc_get_theme() != TC_THEME_NOCOLOR && has_colors()) {
-        attroff(COLOR_PAIR(5) | A_BOLD);
-    }
-    refresh();
-    
-    /* Query the menu - always support X to exit */
-    result = tc_query_menu(my_menu, 1);
-    
+
     /* Clean up */
     tc_free_menu_resources(my_menu);
     tc_end_display();
     
+    sigaction(SIGINT, &old_int, NULL);
+    sigaction(SIGTERM, &old_term, NULL);
+    if (interrupted) { free(choices); return 128 + interrupted; }
+
     /* Output result */
     fprintf(out, "%d\n", result);
     

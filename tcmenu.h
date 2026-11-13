@@ -3,6 +3,7 @@
 
 #include <ncurses.h>
 #include <menu.h>
+#include <signal.h>
 
 /* Menu API types */
 typedef MENU tc_menu_t;
@@ -24,6 +25,12 @@ typedef enum {
  * @param theme The theme to use (dark, light, or nocolor)
  */
 void tc_init_display(tc_theme_t theme);
+
+/* Attach to caller-initialized stdscr. Caller owns input modes and endwin.
+ * Configures theme colors (pairs 1-5). Only one active screen is supported.
+ * Call setlocale before using multibyte text; this library installs no handlers.
+ */
+void tc_attach_display(tc_theme_t theme);
 
 /**
  * Clean up and end the display system.
@@ -49,9 +56,13 @@ tc_menu_t *tc_create_menu(const char *title, int row, int col, int width, int he
  * 
  * @param menu The menu to display
  * @param support_exit If non-zero, allow 'X' key to exit with -3
- * @return Selected item index, -3 for exit, or 0 on error
+ * @return Selected zero-based item index, -3 for exit, or -1 on error
  */
 int tc_query_menu(tc_menu_t *menu, int support_exit);
+
+/* Caller owns signal handlers and flag. Polls every 100ms; -1 on interruption. */
+int tc_query_menu_interruptible(tc_menu_t *menu, int support_exit,
+                                const volatile sig_atomic_t *interrupted);
 
 /**
  * Free menu resources.
